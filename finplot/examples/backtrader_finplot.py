@@ -136,6 +136,21 @@ def plot_rsi(df, ax):
     fplt.plot([50] * len(df), ax=ax, color='gray', style='--', width=1.0,
               legend='强弱线(50)')
 
+
+def plot_macd(df, ax):
+    # plot macd with standard colors first
+    macd = df.close.ewm(span=12).mean() - df.close.ewm(span=26).mean()
+    signal = macd.ewm(span=9).mean()
+    df['macd_diff'] = macd - signal
+    fplt.volume_ocv(df[['open', 'close', 'macd_diff']], ax=ax, colorfunc=fplt.strength_colorfilter)
+    fplt.plot(macd, ax=ax, legend='MACD')
+    fplt.plot(signal, ax=ax, legend='Signal')
+
+    # change to b/w coloring templates for next plots
+    fplt.candle_bull_color = fplt.candle_bear_color = fplt.candle_bear_body_color = '#000'
+    fplt.volume_bull_color = fplt.volume_bear_color = '#333'
+    fplt.candle_bull_body_color = fplt.volume_bull_body_color = '#fff'
+
 def plot_vma(df, ax):
     df.volume.rolling(20).mean().plot(ax=ax, color='#c0c030')
 
@@ -147,7 +162,7 @@ df = download_price_history(
     end_time='2025-01-01'     # 数据结束日期
 )
 
-ax, axv, ax2, ax3, ax4 = fplt.create_plot(f'A股 {symbol} 平均K线图', rows=5)
+ax, axv, ax2, ax3, ax4, ax5 = fplt.create_plot(f'A股 {symbol} 平均K线图', rows=6)
 ax.set_visible(xgrid=True, ygrid=True)
 
 # price chart
@@ -163,6 +178,7 @@ plot_vma(df, ax=axv)
 plot_accumulation_distribution(df, ax2)
 plot_on_balance_volume(df, ax3)
 plot_rsi(df, ax4)
+plot_macd(df, ax5)
 
 # restore view (X-position and zoom) when we run this example again
 fplt.autoviewrestore()
