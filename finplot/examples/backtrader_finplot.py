@@ -143,13 +143,8 @@ def plot_macd(df, ax):
     signal = macd.ewm(span=9).mean()
     df['macd_diff'] = macd - signal
     fplt.volume_ocv(df[['open', 'close', 'macd_diff']], ax=ax, colorfunc=fplt.strength_colorfilter)
-    fplt.plot(macd, ax=ax, legend='MACD')
-    fplt.plot(signal, ax=ax, legend='Signal')
-
-    # change to b/w coloring templates for next plots
-    fplt.candle_bull_color = fplt.candle_bear_color = fplt.candle_bear_body_color = '#000'
-    fplt.volume_bull_color = fplt.volume_bear_color = '#333'
-    fplt.candle_bull_body_color = fplt.volume_bull_body_color = '#fff'
+    fplt.plot(macd, ax=ax, legend='MACD', color='black')
+    fplt.plot(signal, ax=ax, legend='Signal', color='red')
 
 def plot_vma(df, ax):
     df.volume.rolling(20).mean().plot(ax=ax, color='#c0c030')
@@ -161,6 +156,12 @@ df = download_price_history(
     start_time='2014-12-30',  # 你的数据起始日期
     end_time='2025-01-01'     # 数据结束日期
 )
+
+# change to b/w coloring templates for next plots
+fplt.candle_bull_color = fplt.volume_bull_color = 'red'                     # K线/成交量阳线边框颜色
+fplt.candle_bull_body_color = fplt.volume_bull_body_color = 'white'         # K线/成交量阳线实体颜色
+fplt.candle_bear_color = fplt.candle_bear_body_color = 'green'
+fplt.volume_bear_color = fplt.volume_bear_body_color = 'green'
 
 ax, axv, ax2, ax3, ax4, ax5 = fplt.create_plot(f'A股 {symbol} 平均K线图', rows=6)
 ax.set_visible(xgrid=True, ygrid=True)
