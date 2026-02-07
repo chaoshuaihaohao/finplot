@@ -52,27 +52,21 @@ def plot_bollinger_bands(df, ax):
     p1 = df.boll_lo.plot(ax=ax, color='#808080')
     fplt.fill_between(p0, p1, color='#bbb')
 
-
 def plot_ema(df, ax):
     df.close.ewm(span=9).mean().plot(ax=ax, legend='EMA')
 
-def plot_candlestick(df, ax):
-    """
-    绘制标准（原始）K线图（非Heikin-Ashi） + 多周期均线（MA5/10/20/60/200）
-    要求 df 包含 'open', 'close', 'high', 'low' 列
-    """
-    # ===== 1. 绘制K线 =====
-    fplt.candlestick_ochl(df[['open', 'close', 'high', 'low']], ax=ax)
-
-    # ===== 2. 计算并绘制均线 =====
+def plot_ma(df, ax):
+    # 多周期均线（MA5 / 10 / 20 / 60 / 200）
     # 使用局部变量避免污染原df（可选）
     close = df['close']
 
-    ma5 = close.rolling(window=5).mean()
-    ma10 = close.rolling(window=10).mean()
-    ma20 = close.rolling(window=20).mean()
-    ma60 = close.rolling(window=60).mean()
-    ma200 = close.rolling(window=200).mean()
+    # 关键！！！所有均线 加 .dropna()，删除前面无效NaN，不撑大Y轴灰色框
+    ma5 = close.rolling(window=5).mean().dropna()
+    ma10 = close.rolling(window=10).mean().dropna()
+    ma20 = close.rolling(window=20).mean().dropna()
+    ma60 = close.rolling(window=60).mean().dropna()
+    ma200 = close.rolling(window=200).mean().dropna()
+
 
     # 定义颜色（若未定义全局常量，则直接使用十六进制）
     fplt.plot(ma5, ax=ax, color='black', legend='MA5')
@@ -80,6 +74,15 @@ def plot_candlestick(df, ax):
     fplt.plot(ma20, ax=ax, color='#0000FF', legend='MA20')
     fplt.plot(ma60, ax=ax, color='#9933FF', legend='MA60')  # 紫色
     fplt.plot(ma200, ax=ax, color='#009999', legend='MA200')  # 青色
+
+def plot_candlestick(df, ax):
+    """
+    绘制标准（原始）K线图（非Heikin-Ashi）
+    要求 df 包含 'open', 'close', 'high', 'low' 列
+    """
+    # ===== 1. 绘制K线 =====
+    fplt.candlestick_ochl(df[['open', 'close', 'high', 'low']], ax=ax)
+
 
 def plot_heikin_ashi(df, ax):
     df['h_close'] = (df.open+df.close+df.high+df.low) / 4
@@ -169,6 +172,8 @@ def plot_macd(df, ax):
     fplt.volume_ocv(df[['open', 'close', 'macd_diff']], ax=ax, colorfunc=fplt.strength_colorfilter)
     fplt.plot(macd, ax=ax, legend='MACD', color='black')
     fplt.plot(signal, ax=ax, legend='Signal', color='red')
+    fplt.legend_text_color = 'yellow'
+    fplt.legend_background_color = 'green'
 
 def plot_vma(df, ax):
     df.volume.rolling(20).mean().plot(ax=ax, color='#c0c030')
@@ -283,7 +288,36 @@ def draw_trade_signals(df_plot, ax, buy_signals=None, sell_signals=None):
             fplt.plot(sell_x, sell_y, ax=ax, color='#1E90FF',
                       style='^', width=2.5, legend='卖出')
 
+
+#######################################################
+## update crosshair and legend when moving the mouse ##
+
+def update_legend_text(x, y):
+    ts_sec = int(x // 1_000_000_000)
+    if ts_sec not in df.index:
+        if hover_label is not None:
+            hover_label.setText('')  # 清空文本
+        return
+    row = df.loc[ts_sec]
+    fmt = '<span style="color:#%s">%%.2f</span>' % ('red' if (row.open < row.close) else 'green')
+    rawtxt = '<span style="font-size:13px">%%s %%s</span> &nbsp; 开%s 收%s 高%s 低%s' % (fmt, fmt, fmt, fmt)
+    values = [row.open, row.close, row.high, row.low]
+    if hover_label is not None:
+        hover_label.setText(rawtxt % tuple([symbol, interval.upper()] + values))
+
+def update_crosshair_text(x, y, xtext, ytext):
+    ts_sec = int(x // 1_000_000_000)
+    if ts_sec in df.index:
+        close_price = df.loc[ts_sec, 'close']
+        ytext = '%s (close%+.2f)' % (ytext, (y - close_price))
+    return xtext, ytext
+
+
+
+#################################### 以下是主函数部分 ##########################################
+
 symbol = '002738'
+interval = 'd'  # 日线（必须定义！）
 df = download_price_history(
     symbol=symbol,
     start_time='2014-12-30',  # 你的数据起始日期
@@ -297,13 +331,17 @@ fplt.candle_bear_color = fplt.candle_bear_body_color = 'green'
 fplt.volume_bear_color = fplt.volume_bear_body_color = 'green'
 
 ax, axv, ax2, ax3, ax4, ax5, ax6, ax7 = fplt.create_plot(f'A股 {symbol} 平均K线图', rows=8)
-ax.set_visible(xgrid=True, ygrid=True)
+# 不显示第一个ax的网格线
+ax.set_visible(xgrid=False, ygrid=False)
+hover_label = fplt.add_legend('', ax=ax)  # ✅ 全局 hover_label
 
 # price chart
 plot_candlestick(df, ax=ax)
+plot_ma(df, ax)
+
 plot_heikin_ashi(df, ax7)
 plot_bollinger_bands(df, ax7)
-plot_ema(df, ax)
+plot_ema(df, ax7)
 
 # volume chart
 plot_heikin_ashi_volume(df, axv)
@@ -315,6 +353,10 @@ plot_on_balance_volume(df, ax3)
 plot_rsi(df, ax4)
 plot_macd(df, ax5)
 plot_kdj(df, ax6)
+
+
+fplt.set_mouse_callback(update_legend_text, ax=ax, when='hover')
+fplt.add_crosshair_info(update_crosshair_text, ax=ax)
 
 # restore view (X-position and zoom) when we run this example again
 fplt.autoviewrestore()
