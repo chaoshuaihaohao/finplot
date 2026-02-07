@@ -56,6 +56,12 @@ def plot_bollinger_bands(df, ax):
 def plot_ema(df, ax):
     df.close.ewm(span=9).mean().plot(ax=ax, legend='EMA')
 
+def plot_candlestick(df, ax):
+    """
+    绘制标准（原始）K线图（非Heikin-Ashi）
+    要求 df 包含 'open', 'close', 'high', 'low' 列
+    """
+    fplt.candlestick_ochl(df[['open', 'close', 'high', 'low']], ax=ax)
 
 def plot_heikin_ashi(df, ax):
     df['h_close'] = (df.open+df.close+df.high+df.low) / 4
@@ -150,6 +156,72 @@ def plot_vma(df, ax):
     df.volume.rolling(20).mean().plot(ax=ax, color='#c0c030')
 
 
+def plot_kdj(df, ax):
+    """
+    使用 calculate_kdj_bt 计算 KDJ 并绘图（完全对齐A股券商逻辑）
+    """
+
+    def calculate_kdj_bt(df_plot, period=9, k_period=3, d_period=3):
+        """
+        完全对齐【A股券商版KDJ】递推逻辑（2/3前值+1/3当前值），适配所有pandas版本
+        核心：和backtrader的_KDJBase类next()逻辑1:1复刻，彻底解决数据不一致
+        :param df_plot: 原始K线df（含open/high/low/close列，小写）
+        :param period: KDJ核心周期（默认9）
+        :param k_period: 兼容参数（无实际作用，保留为了传参一致）
+        :param d_period: 兼容参数（无实际作用，保留为了传参一致）
+        :return: 带kdj_k/kdj_d/kdj_j列的df
+        """
+        df = df_plot.copy()
+        # 若数据量不足，直接填充50（和券商版KDJ初始化一致）
+        if len(df) < 1:
+            df['kdj_k'] = 50.0
+            df['kdj_d'] = 50.0
+            df['kdj_j'] = 50.0
+            return df
+
+        # Step1：计算RSV - 完全对齐券商版逻辑（手动取N周期高低，除零保护RSV=50）
+        df['n_high'] = df['high'].rolling(window=period, min_periods=1).max()  # 至少1个数据，避免空值
+        df['n_low'] = df['low'].rolling(window=period, min_periods=1).min()
+        # 除零保护：高低价相同时RSV=50（券商标准）
+        df['rsv'] = np.where(
+            df['n_high'] == df['n_low'],
+            50.0,
+            100.0 * (df['close'] - df['n_low']) / (df['n_high'] - df['n_low'])
+        )
+
+        # Step2：计算K/D - 券商版核心递推逻辑（2/3前值 + 1/3当前RSV），初始化K/D=50
+        df['kdj_k'] = 50.0  # 第一根K线初始化K=50
+        df['kdj_d'] = 50.0  # 第一根K线初始化D=50
+        for i in range(1, len(df)):
+            # K线递推：2/3*前一根K + 1/3*当前RSV
+            df.loc[df.index[i], 'kdj_k'] = (2 / 3) * df.loc[df.index[i - 1], 'kdj_k'] + (1 / 3) * df.loc[
+                df.index[i], 'rsv']
+            # D线递推：2/3*前一根D + 1/3*当前K
+            df.loc[df.index[i], 'kdj_d'] = (2 / 3) * df.loc[df.index[i - 1], 'kdj_d'] + (1 / 3) * df.loc[
+                df.index[i], 'kdj_k']
+
+        # Step3：计算J线 - 券商通用公式 3K - 2D
+        df['kdj_j'] = 3 * df['kdj_k'] - 2 * df['kdj_d']
+
+        # 清理中间列，避免干扰后续绘图
+        df.drop(columns=['n_high', 'n_low', 'rsv'], inplace=True)
+
+        # 适配新版pandas的空值填充（无method参数，直接用bfill()），兼容所有版本
+        df['kdj_k'] = df['kdj_k'].bfill().fillna(50.0)
+        df['kdj_d'] = df['kdj_d'].bfill().fillna(50.0)
+        df['kdj_j'] = df['kdj_j'].bfill().fillna(50.0)
+        return df
+    # 1. 调用您提供的计算函数（默认参数 period=9, k/d_period=3）
+    df_with_kdj = calculate_kdj_bt(df, period=9, k_period=3, d_period=3)
+
+    # 2. 绘制 K/D/J 线（使用鲜明且专业的颜色）
+    df_with_kdj['kdj_k'].plot(ax=ax, legend='K', color='black')
+    df_with_kdj['kdj_d'].plot(ax=ax, legend='D', color='orange')
+    df_with_kdj['kdj_j'].plot(ax=ax, legend='J', color='red')
+
+    # 5. 可选：添加超买/超卖区域（半透明）
+    fplt.add_horizontal_band(20, 80, ax=ax)
+
 symbol = '002738'
 df = download_price_history(
     symbol=symbol,
@@ -163,7 +235,7 @@ fplt.candle_bull_body_color = fplt.volume_bull_body_color = 'white'         # K�
 fplt.candle_bear_color = fplt.candle_bear_body_color = 'green'
 fplt.volume_bear_color = fplt.volume_bear_body_color = 'green'
 
-ax, axv, ax2, ax3, ax4, ax5 = fplt.create_plot(f'A股 {symbol} 平均K线图', rows=6)
+ax, axv, ax2, ax3, ax4, ax5, ax6, ax7 = fplt.create_plot(f'A股 {symbol} 平均K线图', rows=8)
 ax.set_visible(xgrid=True, ygrid=True)
 
 # price chart
@@ -174,12 +246,14 @@ plot_ema(df, ax)
 # volume chart
 plot_heikin_ashi_volume(df, axv)
 plot_vma(df, ax=axv)
+plot_candlestick(df, ax=ax7)
 
 # some more charts
 plot_accumulation_distribution(df, ax2)
 plot_on_balance_volume(df, ax3)
 plot_rsi(df, ax4)
 plot_macd(df, ax5)
+plot_kdj(df, ax6)
 
 # restore view (X-position and zoom) when we run this example again
 fplt.autoviewrestore()
