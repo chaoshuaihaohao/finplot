@@ -222,6 +222,49 @@ def plot_kdj(df, ax):
     # 5. 可选：添加超买/超卖区域（半透明）
     fplt.add_horizontal_band(20, 80, ax=ax)
 
+
+def draw_trade_signals(df_plot, ax, buy_signals=None, sell_signals=None):
+    """绘制买卖信号 - 兼容周/月线，动态偏移"""
+    if buy_signals is None:
+        buy_signals = []
+    if sell_signals is None:
+        sell_signals = []
+
+    if len(df_plot) < 1 or (not buy_signals and not sell_signals):
+        return
+
+    # ✅ 修复1: price_offset 应为 0.005 (0.5%) 而非 0.05 (5%)
+    price_offset = 0.005
+    size_reduction = 0.5
+
+    # 买入信号（↓ 三角形，放在最低价下方）
+    if buy_signals:
+        buy_x, buy_y = [], []
+        for dt_str, _ in buy_signals:  # 价格参数未使用，用下划线忽略
+            match_rows = df_plot[df_plot['date_str'] == dt_str]
+            if not match_rows.empty:
+                row = match_rows.iloc[0]
+                signal_price = row['low'] * (1 - price_offset)
+                buy_x.append(row.name)  # 使用时间戳索引
+                buy_y.append(signal_price)
+        if buy_x:
+            fplt.plot(buy_x, buy_y, ax=ax, color='#FFD700',
+                      style='v', width=2.5, legend='买入')
+
+    # 卖出信号（↑ 三角形，放在最高价上方）
+    if sell_signals:
+        sell_x, sell_y = [], []
+        for dt_str, _ in sell_signals:
+            match_rows = df_plot[df_plot['date_str'] == dt_str]
+            if not match_rows.empty:
+                row = match_rows.iloc[0]
+                signal_price = row['high'] * (1 + price_offset)
+                sell_x.append(row.name)
+                sell_y.append(signal_price)
+        if sell_x:
+            fplt.plot(sell_x, sell_y, ax=ax, color='#1E90FF',
+                      style='^', width=2.5, legend='卖出')
+
 symbol = '002738'
 df = download_price_history(
     symbol=symbol,
