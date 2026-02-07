@@ -58,10 +58,28 @@ def plot_ema(df, ax):
 
 def plot_candlestick(df, ax):
     """
-    绘制标准（原始）K线图（非Heikin-Ashi）
+    绘制标准（原始）K线图（非Heikin-Ashi） + 多周期均线（MA5/10/20/60/200）
     要求 df 包含 'open', 'close', 'high', 'low' 列
     """
+    # ===== 1. 绘制K线 =====
     fplt.candlestick_ochl(df[['open', 'close', 'high', 'low']], ax=ax)
+
+    # ===== 2. 计算并绘制均线 =====
+    # 使用局部变量避免污染原df（可选）
+    close = df['close']
+
+    ma5 = close.rolling(window=5).mean()
+    ma10 = close.rolling(window=10).mean()
+    ma20 = close.rolling(window=20).mean()
+    ma60 = close.rolling(window=60).mean()
+    ma200 = close.rolling(window=200).mean()
+
+    # 定义颜色（若未定义全局常量，则直接使用十六进制）
+    fplt.plot(ma5, ax=ax, color='black', legend='MA5')
+    fplt.plot(ma10, ax=ax, color='#FFA500', legend='MA10')
+    fplt.plot(ma20, ax=ax, color='#0000FF', legend='MA20')
+    fplt.plot(ma60, ax=ax, color='#9933FF', legend='MA60')  # 紫色
+    fplt.plot(ma200, ax=ax, color='#009999', legend='MA200')  # 青色
 
 def plot_heikin_ashi(df, ax):
     df['h_close'] = (df.open+df.close+df.high+df.low) / 4
@@ -282,14 +300,14 @@ ax, axv, ax2, ax3, ax4, ax5, ax6, ax7 = fplt.create_plot(f'A股 {symbol} 平均K
 ax.set_visible(xgrid=True, ygrid=True)
 
 # price chart
-plot_heikin_ashi(df, ax)
-plot_bollinger_bands(df, ax)
+plot_candlestick(df, ax=ax)
+plot_heikin_ashi(df, ax7)
+plot_bollinger_bands(df, ax7)
 plot_ema(df, ax)
 
 # volume chart
 plot_heikin_ashi_volume(df, axv)
 plot_vma(df, ax=axv)
-plot_candlestick(df, ax=ax7)
 
 # some more charts
 plot_accumulation_distribution(df, ax2)
