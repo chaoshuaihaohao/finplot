@@ -125,14 +125,12 @@ def add_legend_item(ax, legend_name, plot_item, label):
         legend.addItem(plot_item, label)
 
 
-
-
 def local2timestamp(s):
     return int(dateutil.parser.parse(s).timestamp())
 
 
 def download_price_history(symbol='XBTUSD', start_time='2023-01-01', end_time='2023-10-29', interval_mins=60):
-    csv_file_path = r'D:\业余\github\stockdata\A_data\002738_qfq_A_data.csv'
+    csv_file_path = r'D:\outsidework\github\stockdata\A_data\002738_qfq_A_data.csv'
     # 检查文件是否存在
     if not os.path.exists(csv_file_path):
         raise FileNotFoundError(f"本地CSV文件不存在：{csv_file_path}，请检查路径是否正确！")
@@ -155,18 +153,40 @@ def download_price_history(symbol='XBTUSD', start_time='2023-01-01', end_time='2
 
 
 def plot_accumulation_distribution(df, ax):
-    ad = (2 * df.close - df.high - df.low) * df.volume / (df.high - df.low)
-    ad.cumsum().ffill().plot(ax=ax, legend='Accum/Dist', color='#f00000')
+    mfm_numerator = 2 * df['close'] - df['high'] - df['low']
+    mfm_denominator = df['high'] - df['low']
+
+    mfm = np.where(mfm_denominator == 0, 0.0, mfm_numerator / mfm_denominator)
+    mf_volume = mfm * df['volume']
+
+    # 关键修正：A/D 线起始值设为第一个有效成交量（同花顺常见做法）
+    ad_line = mf_volume.copy()
+    ad_line.iloc[0] = df['volume'].iloc[0]  # 或设为 0，两者差异仅在绝对值，不影响趋势
+    ad_line = ad_line.cumsum()
+
+    ad_line.plot(ax=ax, legend='Accum买方/Dist卖方', color='#f00000')
 
 
 def plot_bollinger_bands(df, ax):
-    mean = df.close.rolling(20).mean()
-    stddev = df.close.rolling(20).std()
-    df['boll_hi'] = mean + 2.5 * stddev
-    df['boll_lo'] = mean - 2.5 * stddev
-    p0 = df.boll_hi.plot(ax=ax, color='#808080', legend='BB')
-    p1 = df.boll_lo.plot(ax=ax, color='#808080')
+    # 同花顺默认参数：20日均线，2倍标准差
+    window = 20
+    num_std = 2.5
+
+    mean = df['close'].rolling(window=window).mean()
+    stddev = df['close'].rolling(window=window).std(ddof=0)  # ddof=0 更贴近金融计算惯例
+
+    df['boll_hi'] = mean + num_std * stddev
+    df['boll_lo'] = mean - num_std * stddev
+
+    # 绘制上下轨（灰色）
+    p0 = df['boll_hi'].plot(ax=ax, color='#808080', legend='BB Upper')
+    p1 = df['boll_lo'].plot(ax=ax, color='#808080', legend='BB Lower')
+
+    # 填充通道区域（浅灰色）
     fplt.fill_between(p0, p1, color='#bbb')
+
+    # 可选：绘制中轨（同花顺通常不单独标出中轨，但有时会显示）
+    mean.plot(ax=ax, color='#808080', style='--', width=1.0)
 
 
 def plot_ema(df, ax):
@@ -225,10 +245,18 @@ def plot_heikin_ashi_volume(df, ax):
 
 
 def plot_on_balance_volume(df, ax):
-    obv = df.volume.copy()
-    obv[df.close < df.close.shift()] = -obv
-    obv[df.close == df.close.shift()] = 0
-    obv.cumsum().plot(ax=ax, legend='OBV', color='#008800')
+    obv = pd.Series(index=df.index, dtype='float64')
+    obv.iloc[0] = df['volume'].iloc[0]  # 第一天 OBV = 成交量
+
+    for i in range(1, len(df)):
+        if df['close'].iloc[i] > df['close'].iloc[i - 1]:
+            obv.iloc[i] = obv.iloc[i - 1] + df['volume'].iloc[i]
+        elif df['close'].iloc[i] < df['close'].iloc[i - 1]:
+            obv.iloc[i] = obv.iloc[i - 1] - df['volume'].iloc[i]
+        else:
+            obv.iloc[i] = obv.iloc[i - 1]  # 相等时保持不变
+
+    obv.plot(ax=ax, legend='OBV量价关系', color='#008800')
 
 
 def plot_rsi(df, ax):
@@ -414,10 +442,48 @@ def draw_trade_signals(df_plot, ax, buy_signals=None, sell_signals=None):
                       style='^', width=2.5, legend='卖出')
 
 
-#######################################################
-## update crosshair and legend when moving the mouse ##
+def append_trade_signals(df_plot, ax, signals):
+    """
+    向图表追加买卖信号（兼容你的绘图系统）
 
-def update_legend_text(x, y):
+    :param df_plot: DataFrame，必须包含 'date_str' 列（格式 '%Y-%m-%d'）以及 'high', 'low'
+    :param ax: finplot 的绘图轴（ax）
+    :param signals: list of dict or tuple，例如：
+                    - [{'date': '2023-05-10', 'type': 'buy'}, {'date': '2023-06-15', 'type': 'sell'}]
+                    - 或 [('2023-05-10', 'buy'), ('2023-06-15', 'sell')]
+    """
+    if not signals:
+        return
+
+    buy_signals = []
+    sell_signals = []
+
+    # 解析 signals 格式
+    for sig in signals:
+        if isinstance(sig, dict):
+            date_str = sig['date']
+            sig_type = sig.get('type', '').lower()
+        elif isinstance(sig, (tuple, list)) and len(sig) >= 2:
+            date_str = sig[0]
+            sig_type = str(sig[1]).lower()
+        else:
+            continue  # 跳过无效格式
+
+        if sig_type in ('buy', 'b', '买入'):
+            buy_signals.append((date_str, None))
+        elif sig_type in ('sell', 's', '卖出'):
+            sell_signals.append((date_str, None))
+
+    # 复用你已有的 draw_trade_signals 函数
+    draw_trade_signals(df_plot, ax, buy_signals=buy_signals, sell_signals=sell_signals)
+
+
+# ========== 公共回调函数（可被外部复用或覆盖） ==========
+def default_hover_callback(x, y, df, symbol, interval, hover_label, ax):
+    """
+    默认的鼠标悬停提示回调函数。
+    可被外部替换以自定义显示内容。
+    """
     ts_sec = int(x // 1_000_000_000)
     if ts_sec not in df.index:
         if hover_label is not None:
@@ -425,20 +491,22 @@ def update_legend_text(x, y):
         return
     row = df.loc[ts_sec]
     color = 'red' if row.open < row.close else 'green'
-    # 修复：单行HTML + 直接格式化，避免换行导致的渲染问题
     rawtxt = (f'<span style="font-size:13px">{symbol} {interval.upper()}</span> '
               f'开<span style="color:{color}">{row.open:.2f}</span> '
               f'收<span style="color:{color}">{row.close:.2f}</span> '
               f'高<span style="color:{color}">{row.high:.2f}</span> '
               f'低<span style="color:{color}">{row.low:.2f}</span>')
     if hover_label is not None:
-        # 动态校准位置（解决ax.width()初始化时为0的问题）
         ax_rect = ax.boundingRect()
         hover_label.setPos(ax_rect.width() - 350, 20)
         hover_label.setText(rawtxt)
 
 
-def update_crosshair_text(x, y, xtext, ytext):
+def default_crosshair_callback(x, y, xtext, ytext, df):
+    """
+    默认的十字线信息回调函数。
+    可被外部替换以自定义Y轴显示。
+    """
     ts_sec = int(x // 1_000_000_000)
     if ts_sec in df.index:
         close_price = df.loc[ts_sec, 'close']
@@ -446,71 +514,105 @@ def update_crosshair_text(x, y, xtext, ytext):
     return xtext, ytext
 
 
-#################################### 以下是主函数部分 ##########################################
+# ========== 核心公共API ==========
+def plot_a_stock_analysis(
+    df,
+    symbol='A股',
+    title_suffix='',
+    hover_callback=None,      # 新增参数
+    crosshair_callback=None   # 新增参数
+):
+    """
+    绘制完整的A股多指标分析图。
 
-symbol = '002738'
-interval = 'd'  # 日线（必须定义！）
-df = download_price_history(
-    symbol=symbol,
-    start_time='2014-12-30',  # 你的数据起始日期
-    end_time='2025-01-01'  # 数据结束日期
-)
+    参数:
+        df (pd.DataFrame): 必须包含列 ['open', 'high', 'low', 'close', 'volume']，且索引为时间戳（秒）。
+                           还需包含 'date_str' 列（格式 '%Y-%m-%d'），用于信号绘制。
+        symbol (str): 股票代码，用于标题和悬停提示。
+        title_suffix (str): 标题后缀，可选。
+        hover_callback (callable): 自定义悬停回调，签名为 func(x, y, df, symbol, interval, hover_label, ax)
+        crosshair_callback (callable): 自定义十字线回调，签名为 func(x, y, xtext, ytext, df)
+    """
+    interval = 'd'  # 日线（必须定义！）
 
-# 新增：添加date_str列（draw_trade_signals需要）
-df['date_str'] = pd.to_datetime(df.index, unit='s').strftime('%Y-%m-%d')
+    # change to b/w coloring templates for next plots
+    fplt.candle_bull_color = fplt.volume_bull_color = 'red'  # K线/成交量阳线边框颜色
+    fplt.candle_bull_body_color = fplt.volume_bull_body_color = 'white'  # K线/成交量阳线实体颜色
+    fplt.candle_bear_color = fplt.candle_bear_body_color = 'green'
+    fplt.volume_bear_color = fplt.volume_bear_body_color = 'green'
+    fplt.legend_text_color = 'black'
+    fplt.legend_background_color = 'gray'
 
-# change to b/w coloring templates for next plots
-fplt.candle_bull_color = fplt.volume_bull_color = 'red'  # K线/成交量阳线边框颜色
-fplt.candle_bull_body_color = fplt.volume_bull_body_color = 'white'  # K线/成交量阳线实体颜色
-fplt.candle_bear_color = fplt.candle_bear_body_color = 'green'
-fplt.volume_bear_color = fplt.volume_bear_body_color = 'green'
-fplt.legend_text_color = 'black'
-fplt.legend_background_color = 'gray'
+    full_title = f'A股 {symbol} 平均K线图'
+    if title_suffix:
+        full_title += f' - {title_suffix}'
+    ax, axv, ax2, ax3, ax4, ax5, ax6, ax7 = fplt.create_plot(full_title, rows=8)
+    # 不显示第一个ax的网格线
+    ax.set_visible(xgrid=False, ygrid=False)
 
-ax, axv, ax2, ax3, ax4, ax5, ax6, ax7 = fplt.create_plot(f'A股 {symbol} 平均K线图', rows=8)
-# 不显示第一个ax的网格线
-ax.set_visible(xgrid=False, ygrid=False)
+    # ========== 核心修改：创建独立的MA图例容器 ==========
+    create_legend(
+        ax=ax,
+        name="ma_legend",
+        pos="top_left",
+        size=(120, 50),
+        bg_color=fplt.legend_background_color,
+        text_color=fplt.legend_text_color
+    )
 
-# ========== 核心修改：创建独立的MA图例容器 ==========
-create_legend(
-    ax=ax,
-    name="ma_legend",
-    pos="top_left",
-    size=(120, 50),
-    bg_color=fplt.legend_background_color,
-    text_color=fplt.legend_text_color
-)
+    # ========== 主函数中：用finplot原生add_legend创建hover提示（替代pg.LabelItem） ==========
+    hover_label = fplt.add_legend('', ax=ax)
+    # 初始位置兜底（避免ax.width()为0导致位置错误）
+    hover_label.setPos(800, 20)  # 先设一个固定值，hover时再校准
+    hover_label.setZValue(1000)  # 提升层级，确保在最上层
 
-# ========== 主函数中：用finplot原生add_legend创建hover提示（替代pg.LabelItem） ==========
-# ========== 主函数中：用finplot原生add_legend创建hover提示 ==========
-hover_label = fplt.add_legend('', ax=ax)
-# 初始位置兜底（避免ax.width()为0导致位置错误）
-hover_label.setPos(800, 20)  # 先设一个固定值，hover时再校准
-hover_label.setZValue(1000)  # 提升层级，确保在最上层
+    # price chart
+    plot_candlestick(df, ax=ax)
+    plot_ma(df, ax)
 
-# price chart
-plot_candlestick(df, ax=ax)
-plot_ma(df, ax)
+    plot_heikin_ashi(df, ax7)
+    plot_bollinger_bands(df, ax7)
+    plot_ema(df, ax7)
 
-plot_heikin_ashi(df, ax7)
-plot_bollinger_bands(df, ax7)
-plot_ema(df, ax7)
+    # volume chart
+    plot_heikin_ashi_volume(df, axv)
+    plot_vma(df, ax=axv)
 
-# volume chart
-plot_heikin_ashi_volume(df, axv)
-plot_vma(df, ax=axv)
+    # some more charts
+    plot_accumulation_distribution(df, ax2)
+    plot_on_balance_volume(df, ax3)
+    plot_rsi(df, ax4)
+    plot_macd(df, ax5)
+    plot_kdj(df, ax6)
 
-# some more charts
-plot_accumulation_distribution(df, ax2)
-plot_on_balance_volume(df, ax3)
-plot_rsi(df, ax4)
-plot_macd(df, ax5)
-plot_kdj(df, ax6)
+    # ========== 设置回调（使用默认或用户提供的） ==========
+    final_hover_cb = hover_callback or default_hover_callback
+    final_crosshair_cb = crosshair_callback or default_crosshair_callback
 
-fplt.set_mouse_callback(update_legend_text, ax=ax, when='hover')
-fplt.add_crosshair_info(update_crosshair_text, ax=ax)
+    # 包装成 finplot 能接受的形式（闭包捕获当前上下文）
+    def wrapped_hover(x, y):
+        return final_hover_cb(x, y, df, symbol, interval, hover_label, ax)
 
-# restore view (X-position and zoom) when we run this example again
-fplt.autoviewrestore()
+    def wrapped_crosshair(x, y, xtext, ytext):
+        return final_crosshair_cb(x, y, xtext, ytext, df)
 
-fplt.show()
+    fplt.set_mouse_callback(wrapped_hover, ax=ax, when='hover')
+    fplt.add_crosshair_info(wrapped_crosshair, ax=ax)
+
+    # restore view (X-position and zoom) when we run this example again
+    fplt.autoviewrestore()
+
+    fplt.show()
+
+
+# 如果直接运行此文件，则执行示例（保留原有逻辑）
+if __name__ == '__main__':
+    symbol = '002738'
+    df = download_price_history(
+        symbol=symbol,
+        start_time='2014-12-30',  # 你的数据起始日期
+        end_time='2026-01-01'  # 数据结束日期
+    )
+    # 新增：添加date_str列（draw_trade_signals需要）
+    df['date_str'] = pd.to_datetime(df.index, unit='s').strftime('%Y-%m-%d')
+    plot_a_stock_analysis(df, symbol=symbol)
