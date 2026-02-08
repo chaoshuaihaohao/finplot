@@ -132,7 +132,7 @@ def local2timestamp(s):
 
 
 def download_price_history(symbol='XBTUSD', start_time='2023-01-01', end_time='2023-10-29', interval_mins=60):
-    csv_file_path = r'D:\业余\github\stockdata\A_data\002738_qfq_A_data.csv'
+    csv_file_path = r'D:\outsidework\github\stockdata\A_data\002738_qfq_A_data.csv'
     # 检查文件是否存在
     if not os.path.exists(csv_file_path):
         raise FileNotFoundError(f"本地CSV文件不存在：{csv_file_path}，请检查路径是否正确！")
@@ -415,24 +415,83 @@ def draw_trade_signals(df_plot, ax, buy_signals=None, sell_signals=None):
 
 
 #######################################################
+def get_ma_values_at_ts(df, ts_sec):
+    """
+    根据时间戳获取对应位置的MA5/10/20/60/200数值
+    :param df: 原始数据df
+    :param ts_sec: 时间戳（秒）
+    :return: 各均线数值字典（无值则为NaN）
+    """
+    # 重新计算均线（和plot_ma保持一致）
+    close = df['close']
+    ma5 = close.rolling(window=5).mean()
+    ma10 = close.rolling(window=10).mean()
+    ma20 = close.rolling(window=20).mean()
+    ma60 = close.rolling(window=60).mean()
+    ma200 = close.rolling(window=200).mean()
+
+    # 构建均线数据（索引和原df一致）
+    ma_data = pd.DataFrame({
+        'MA5': ma5,
+        'MA10': ma10,
+        'MA20': ma20,
+        'MA60': ma60,
+        'MA200': ma200
+    }, index=df.index)
+
+    # 获取指定时间戳的均线值
+    ma_values = {}
+    if ts_sec in ma_data.index:
+        row = ma_data.loc[ts_sec]
+        ma_values = {
+            'MA5': row['MA5'],
+            'MA10': row['MA10'],
+            'MA20': row['MA20'],
+            'MA60': row['MA60'],
+            'MA200': row['MA200']
+        }
+    return ma_values
+
 ## update crosshair and legend when moving the mouse ##
 
 def update_legend_text(x, y):
     ts_sec = int(x // 1_000_000_000)
+
+    # ========== 新增：更新MA图例数值 ==========
+    ma_legend = get_legend(ax, "ma_legend")
+    if ma_legend:
+        # 清空原有图例项（避免重复）
+        for item in ma_legend.items:
+            ma_legend.removeItem(item[0])
+        # 获取当前位置的均线数值
+        ma_values = get_ma_values_at_ts(df, ts_sec)
+        # 重新添加带数值的图例项
+        ma_colors = {
+            'MA5': 'black',
+            'MA10': '#FFA500',
+            'MA20': '#0000FF',
+            'MA60': '#9933FF',
+            'MA200': '#009999'
+        }
+        for ma_name, value in ma_values.items():
+            if not np.isnan(value):
+                # 创建临时PlotItem用于显示颜色+文本（带数值）
+                temp_plot = pg.PlotDataItem(pen=pg.mkPen(ma_colors[ma_name]))
+                ma_legend.addItem(temp_plot, f'{ma_name}: {value:.2f}')
+
+    # ========== 原有：更新hover提示 ==========
     if ts_sec not in df.index:
         if hover_label is not None:
             hover_label.setText('')  # 空文本
         return
     row = df.loc[ts_sec]
     color = 'red' if row.open < row.close else 'green'
-    # 修复：单行HTML + 直接格式化，避免换行导致的渲染问题
     rawtxt = (f'<span style="font-size:13px">{symbol} {interval.upper()}</span> '
               f'开<span style="color:{color}">{row.open:.2f}</span> '
               f'收<span style="color:{color}">{row.close:.2f}</span> '
               f'高<span style="color:{color}">{row.high:.2f}</span> '
               f'低<span style="color:{color}">{row.low:.2f}</span>')
     if hover_label is not None:
-        # 动态校准位置（解决ax.width()初始化时为0的问题）
         ax_rect = ax.boundingRect()
         hover_label.setPos(ax_rect.width() - 350, 20)
         hover_label.setText(rawtxt)
