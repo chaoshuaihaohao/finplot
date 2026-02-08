@@ -7,124 +7,10 @@ import numpy as np
 import pandas as pd
 import requests
 import os
-# 新增：导入pyqtgraph用于创建独立图例
-import pyqtgraph as pg
+import pyqtgraph as pg  # 新增：导入pyqtgraph用于创建图例
 
 baseurl = 'https://www.bitmex.com/api'
 fplt.timestamp_format = '%m/%d/%Y %H:%M:%S.%f'
-
-
-# ========== 新增：独立图例容器API ==========
-def create_legend(ax,
-                  name="default",
-                  pos="top_left",
-                  size=(100, 100),
-                  bg_color="white",
-                  text_color="black",
-                  border_color="#cccccc"):
-    """
-    创建独立的图例容器（绑定到指定ax）
-    :param ax: 绑定的绘图轴（finplot的ax/PlotItem）
-    :param name: 图例唯一标识（用于后续获取）
-    :param pos: 位置，支持top_left/top_right/bottom_left/bottom_right或(x,y)元组
-    :param size: 图例尺寸 (width, height)
-    :param bg_color: 背景色
-    :param text_color: 文本色
-    :param border_color: 边框色
-    :return: 创建的LegendItem实例
-    """
-    # 初始化图例容器
-    legend = pg.LegendItem(size=size, offset=(0, 0))
-    legend.setParentItem(ax)
-    legend._name = name  # 绑定唯一标识
-
-    # 设置样式
-    legend._bg_color = pg.mkColor(bg_color)
-    legend._text_color = pg.mkColor(text_color)
-    legend._border_color = pg.mkColor(border_color)
-
-    # 重写paint方法自定义样式
-    def custom_paint(p, *args):
-        p.setPen(pg.mkPen(legend._border_color))
-        p.setBrush(pg.mkBrush(legend._bg_color))
-        p.drawRect(legend.boundingRect())
-
-    legend.paint = custom_paint
-
-    # 设置位置
-    set_legend_pos(legend, pos, ax)
-
-    # 存储到ax的自定义属性中（方便后续获取）
-    if not hasattr(ax, "_legends"):
-        ax._legends = {}
-    ax._legends[name] = legend
-
-    return legend
-
-
-def get_legend(ax, name="default"):
-    """
-    根据名称获取独立图例容器
-    :param ax: 绘图轴
-    :param name: 图例唯一标识
-    :return: LegendItem实例（不存在返回None）
-    """
-    if hasattr(ax, "_legends") and name in ax._legends:
-        return ax._legends[name]
-    return None
-
-
-def set_legend_pos(legend, pos, ax=None):
-    """
-    设置图例位置
-    :param legend: 图例实例
-    :param pos: 位置，支持top_left/top_right/bottom_left/bottom_right或(x,y)元组
-    :param ax: 绘图轴（用于计算相对位置）
-    """
-    if ax is None:
-        ax = legend.parentItem()
-    if not ax:
-        return
-
-    # 获取ax的边界矩形
-    ax_rect = ax.boundingRect()
-    ax_width = ax_rect.width()
-    ax_height = ax_rect.height()
-    # 修复：size是属性（tuple），不是方法，去掉括号
-    legend_width, legend_height = legend.size
-
-    # 解析位置
-    pos_map = {
-        "top_left": (10, ax_height - legend_height - 10),
-        "top_right": (ax_width - legend_width - 10, ax_height - legend_height - 10),
-        "bottom_left": (10, 10),
-        "bottom_right": (ax_width - legend_width - 10, 10)
-    }
-    if isinstance(pos, str) and pos in pos_map:
-        x, y = pos_map[pos]
-    elif isinstance(pos, (tuple, list)) and len(pos) == 2:
-        x, y = pos
-    else:
-        x, y = pos_map["top_left"]  # 默认左上角
-
-    # 设置位置并锚定
-    legend.setPos(x, y)
-    legend.anchor((0, 1), (0, 1))  # 锚点对齐图例左上角
-
-
-def add_legend_item(ax, legend_name, plot_item, label):
-    """
-    给指定图例添加条目
-    :param ax: 绘图轴
-    :param legend_name: 图例名称
-    :param plot_item: finplot绘制的曲线/图形实例
-    :param label: 图例文本
-    """
-    legend = get_legend(ax, legend_name)
-    if legend:
-        legend.addItem(plot_item, label)
-
-
 
 
 def local2timestamp(s):
@@ -155,15 +41,15 @@ def download_price_history(symbol='XBTUSD', start_time='2023-01-01', end_time='2
 
 
 def plot_accumulation_distribution(df, ax):
-    ad = (2 * df.close - df.high - df.low) * df.volume / (df.high - df.low)
+    ad = (2*df.close-df.high-df.low) * df.volume / (df.high - df.low)
     ad.cumsum().ffill().plot(ax=ax, legend='Accum/Dist', color='#f00000')
 
 
 def plot_bollinger_bands(df, ax):
     mean = df.close.rolling(20).mean()
     stddev = df.close.rolling(20).std()
-    df['boll_hi'] = mean + 2.5 * stddev
-    df['boll_lo'] = mean - 2.5 * stddev
+    df['boll_hi'] = mean + 2.5*stddev
+    df['boll_lo'] = mean - 2.5*stddev
     p0 = df.boll_hi.plot(ax=ax, color='#808080', legend='BB')
     p1 = df.boll_lo.plot(ax=ax, color='#808080')
     fplt.fill_between(p0, p1, color='#bbb')
@@ -173,7 +59,7 @@ def plot_ema(df, ax):
     df.close.ewm(span=9).mean().plot(ax=ax, legend='EMA')
 
 
-def plot_ma(df, ax):
+def plot_ma(df, ax, ma_legend):
     # 多周期均线（MA5 / 10 / 20 / 60 / 200）
     # 使用局部变量避免污染原df（可选）
     close = df['close']
@@ -185,32 +71,35 @@ def plot_ma(df, ax):
     ma60 = close.rolling(window=60).mean().dropna()
     ma200 = close.rolling(window=200).mean().dropna()
 
-    # 绘制均线并添加到独立MA图例
+    # 定义颜色（若未定义全局常量，则直接使用十六进制）
+    # 关键修改：不再用legend参数，而是将曲线添加到指定的ma_legend
     curve5 = fplt.plot(ma5, ax=ax, color='black')
     curve10 = fplt.plot(ma10, ax=ax, color='#FFA500')
     curve20 = fplt.plot(ma20, ax=ax, color='#0000FF')
     curve60 = fplt.plot(ma60, ax=ax, color='#9933FF')  # 紫色
     curve200 = fplt.plot(ma200, ax=ax, color='#009999')  # 青色
 
-    # 添加到独立MA图例
-    add_legend_item(ax, "ma_legend", curve5, 'MA5')
-    add_legend_item(ax, "ma_legend", curve10, 'MA10')
-    add_legend_item(ax, "ma_legend", curve20, 'MA20')
-    add_legend_item(ax, "ma_legend", curve60, 'MA60')
-    add_legend_item(ax, "ma_legend", curve200, 'MA200')
+    # 为均线图例添加条目
+    ma_legend.addItem(curve5, 'MA5')
+    ma_legend.addItem(curve10, 'MA10')
+    ma_legend.addItem(curve20, 'MA20')
+    ma_legend.addItem(curve60, 'MA60')
+    ma_legend.addItem(curve200, 'MA200')
 
 
-def plot_candlestick(df, ax):
+def plot_candlestick(df, ax, price_legend):
     """
     绘制标准（原始）K线图（非Heikin-Ashi）
     要求 df 包含 'open', 'close', 'high', 'low' 列
     """
     # ===== 1. 绘制K线 =====
-    fplt.candlestick_ochl(df[['open', 'close', 'high', 'low']], ax=ax)
+    candle_item = fplt.candlestick_ochl(df[['open', 'close', 'high', 'low']], ax=ax)
+    # 为价格图例添加K线条目
+    price_legend.addItem(candle_item, 'K线')
 
 
 def plot_heikin_ashi(df, ax):
-    df['h_close'] = (df.open + df.close + df.high + df.low) / 4
+    df['h_close'] = (df.open+df.close+df.high+df.low) / 4
     ho = (df.open.iloc[0] + df.close.iloc[0]) / 2
     for i, hc in zip(df.index, df['h_close']):
         df.loc[i, 'h_open'] = ho
@@ -297,6 +186,8 @@ def plot_macd(df, ax):
     fplt.volume_ocv(df[['open', 'close', 'macd_diff']], ax=ax, colorfunc=fplt.strength_colorfilter)
     fplt.plot(macd, ax=ax, legend='MACD', color='black')
     fplt.plot(signal, ax=ax, legend='Signal', color='red')
+    fplt.legend_text_color = 'yellow'
+    fplt.legend_background_color = 'green'
 
 
 def plot_vma(df, ax):
@@ -371,7 +262,7 @@ def plot_kdj(df, ax):
     fplt.add_horizontal_band(20, 80, ax=ax)
 
 
-def draw_trade_signals(df_plot, ax, buy_signals=None, sell_signals=None):
+def draw_trade_signals(df_plot, ax, price_legend, buy_signals=None, sell_signals=None):
     """绘制买卖信号 - 兼容周/月线，动态偏移"""
     if buy_signals is None:
         buy_signals = []
@@ -396,8 +287,10 @@ def draw_trade_signals(df_plot, ax, buy_signals=None, sell_signals=None):
                 buy_x.append(row.name)  # 使用时间戳索引
                 buy_y.append(signal_price)
         if buy_x:
-            fplt.plot(buy_x, buy_y, ax=ax, color='#FFD700',
-                      style='v', width=2.5, legend='买入')
+            buy_curve = fplt.plot(buy_x, buy_y, ax=ax, color='#FFD700',
+                                  style='v', width=2.5)
+            # 买卖信号添加到价格图例
+            price_legend.addItem(buy_curve, '买入')
 
     # 卖出信号（↑ 三角形，放在最高价上方）
     if sell_signals:
@@ -410,8 +303,10 @@ def draw_trade_signals(df_plot, ax, buy_signals=None, sell_signals=None):
                 sell_x.append(row.name)
                 sell_y.append(signal_price)
         if sell_x:
-            fplt.plot(sell_x, sell_y, ax=ax, color='#1E90FF',
-                      style='^', width=2.5, legend='卖出')
+            sell_curve = fplt.plot(sell_x, sell_y, ax=ax, color='#1E90FF',
+                                   style='^', width=2.5)
+            # 买卖信号添加到价格图例
+            price_legend.addItem(sell_curve, '卖出')
 
 
 #######################################################
@@ -421,21 +316,14 @@ def update_legend_text(x, y):
     ts_sec = int(x // 1_000_000_000)
     if ts_sec not in df.index:
         if hover_label is not None:
-            hover_label.setText('')  # 空文本
+            hover_label.setText('')  # 清空文本
         return
     row = df.loc[ts_sec]
-    color = 'red' if row.open < row.close else 'green'
-    # 修复：单行HTML + 直接格式化，避免换行导致的渲染问题
-    rawtxt = (f'<span style="font-size:13px">{symbol} {interval.upper()}</span> '
-              f'开<span style="color:{color}">{row.open:.2f}</span> '
-              f'收<span style="color:{color}">{row.close:.2f}</span> '
-              f'高<span style="color:{color}">{row.high:.2f}</span> '
-              f'低<span style="color:{color}">{row.low:.2f}</span>')
+    fmt = '<span style="color:#%s">%%.2f</span>' % ('red' if (row.open < row.close) else 'green')
+    rawtxt = '<span style="font-size:13px">%%s %%s</span> &nbsp; 开%s 收%s 高%s 低%s' % (fmt, fmt, fmt, fmt)
+    values = [row.open, row.close, row.high, row.low]
     if hover_label is not None:
-        # 动态校准位置（解决ax.width()初始化时为0的问题）
-        ax_rect = ax.boundingRect()
-        hover_label.setPos(ax_rect.width() - 350, 20)
-        hover_label.setText(rawtxt)
+        hover_label.setText(rawtxt % tuple([symbol, interval.upper()] + values))
 
 
 def update_crosshair_text(x, y, xtext, ytext):
@@ -453,10 +341,10 @@ interval = 'd'  # 日线（必须定义！）
 df = download_price_history(
     symbol=symbol,
     start_time='2014-12-30',  # 你的数据起始日期
-    end_time='2025-01-01'  # 数据结束日期
+    end_time='2025-01-01'     # 数据结束日期
 )
 
-# 新增：添加date_str列（draw_trade_signals需要）
+# 修复：df添加date_str列（用于买卖信号匹配）
 df['date_str'] = pd.to_datetime(df.index, unit='s').strftime('%Y-%m-%d')
 
 # change to b/w coloring templates for next plots
@@ -464,33 +352,37 @@ fplt.candle_bull_color = fplt.volume_bull_color = 'red'  # K线/成交量阳线�
 fplt.candle_bull_body_color = fplt.volume_bull_body_color = 'white'  # K线/成交量阳线实体颜色
 fplt.candle_bear_color = fplt.candle_bear_body_color = 'green'
 fplt.volume_bear_color = fplt.volume_bear_body_color = 'green'
-fplt.legend_text_color = 'black'
-fplt.legend_background_color = 'gray'
 
 ax, axv, ax2, ax3, ax4, ax5, ax6, ax7 = fplt.create_plot(f'A股 {symbol} 平均K线图', rows=8)
 # 不显示第一个ax的网格线
 ax.set_visible(xgrid=False, ygrid=False)
+hover_label = fplt.add_legend('', ax=ax)  # ✅ 全局 hover_label
 
-# ========== 核心修改：创建独立的MA图例容器 ==========
-create_legend(
-    ax=ax,
-    name="ma_legend",
-    pos="top_left",
-    size=(120, 50),
-    bg_color=fplt.legend_background_color,
-    text_color=fplt.legend_text_color
+# ===================== 核心修改：创建两个独立的图例 =====================
+# 1. 价格图例（K线/买卖信号）- 放在ax右上角
+price_legend = fplt.FinLegendItem(
+    border_color=fplt.legend_border_color,
+    fill_color=fplt.legend_fill_color,
+    offset=(0, 0)
 )
+price_legend.setParentItem(ax)
+price_legend.setPos(1, 1)  # 右上角坐标
+price_legend.anchor((1, 1), (1, 1))  # 锚点对齐：图例右上角 ↔ ax右上角
 
-# ========== 主函数中：用finplot原生add_legend创建hover提示（替代pg.LabelItem） ==========
-# ========== 主函数中：用finplot原生add_legend创建hover提示 ==========
-hover_label = fplt.add_legend('', ax=ax)
-# 初始位置兜底（避免ax.width()为0导致位置错误）
-hover_label.setPos(800, 20)  # 先设一个固定值，hover时再校准
-hover_label.setZValue(1000)  # 提升层级，确保在最上层
+# 2. 均线图例（MA5/10/20等）- 放在ax左上角
+ma_legend = fplt.FinLegendItem(
+    border_color=fplt.legend_border_color,
+    fill_color=fplt.legend_fill_color,
+    offset=(0, 0)
+)
+ma_legend.setParentItem(ax)
+ma_legend.setPos(0, 1)  # 左上角坐标
+ma_legend.anchor((0, 1), (0, 1))  # 锚点对齐：图例左上角 ↔ ax左上角
 
+# ===================== 绘图：指定图例 =====================
 # price chart
-plot_candlestick(df, ax=ax)
-plot_ma(df, ax)
+plot_candlestick(df, ax=ax, price_legend=price_legend)  # 传入价格图例
+plot_ma(df, ax=ax, ma_legend=ma_legend)  # 传入均线图例
 
 plot_heikin_ashi(df, ax7)
 plot_bollinger_bands(df, ax7)
@@ -506,6 +398,12 @@ plot_on_balance_volume(df, ax3)
 plot_rsi(df, ax4)
 plot_macd(df, ax5)
 plot_kdj(df, ax6)
+
+# 示例：添加买卖信号（测试用，可替换为你的真实信号）
+test_buy_signals = [('2024-01-01', 0), ('2024-03-01', 0)]
+test_sell_signals = [('2024-02-01', 0), ('2024-04-01', 0)]
+draw_trade_signals(df, ax=ax, price_legend=price_legend,
+                   buy_signals=test_buy_signals, sell_signals=test_sell_signals)
 
 fplt.set_mouse_callback(update_legend_text, ax=ax, when='hover')
 fplt.add_crosshair_info(update_crosshair_text, ax=ax)
