@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+#btfinplot.py
 
 from collections import defaultdict
 import dateutil.parser
@@ -328,7 +329,7 @@ def plot_macd(df, ax):
 
 
 def plot_vma(df, ax):
-    df.volume.rolling(20).mean().plot(ax=ax, color='#c0c030')
+    df.volume.rolling(20).mean().plot(ax=ax, legend='VOL20', color='#c0c030')
 
 
 def plot_kdj(df, ax):
@@ -406,40 +407,66 @@ def draw_trade_signals(df_plot, ax, buy_signals=None, sell_signals=None):
     if sell_signals is None:
         sell_signals = []
 
+    # === 新增：关键检查，确保 df_plot 有 date_str 列 ===
+    if 'date_str' not in df_plot.columns:
+        print("⚠️ Warning: df_plot 缺少 'date_str' 列，无法绘制交易信号！")
+        return
+    # ===================================================
+
     if len(df_plot) < 1 or (not buy_signals and not sell_signals):
         return
 
-    # ✅ 修复1: price_offset 应为 0.005 (0.5%) 而非 0.05 (5%)
-    price_offset = 0.005
-    size_reduction = 0.5
+    price_offset = 0.05
 
     # 买入信号（↓ 三角形，放在最低价下方）
     if buy_signals:
         buy_x, buy_y = [], []
-        for dt_str, _ in buy_signals:  # 价格参数未使用，用下划线忽略
-            match_rows = df_plot[df_plot['date_str'] == dt_str]
-            if not match_rows.empty:
-                row = match_rows.iloc[0]
-                signal_price = row['low'] * (1 - price_offset)
-                buy_x.append(row.name)  # 使用时间戳索引
+        for dt_str, _ in buy_signals:
+            # 使用 .loc 和布尔索引更安全
+            mask = df_plot['date_str'] == dt_str
+            if mask.any():
+                # 找到匹配行的索引（即 time 时间戳，现在是秒级）
+                idx = df_plot.index[mask][0]
+                signal_price = df_plot.loc[idx, 'low'] * (1 - price_offset)
+                buy_x.append(idx)  # 直接使用秒级索引
                 buy_y.append(signal_price)
         if buy_x:
-            fplt.plot(buy_x, buy_y, ax=ax, color='#FFD700',
-                      style='v', width=2.5, legend='买入')
+            # ========== 【关键修改】先绘制，再设置Z值 ==========
+            plot_item = fplt.plot(buy_x, buy_y, ax=ax, color='#FFD700',
+                                  style='v', width=2.5, legend='买入')
+            # 添加调试信息
+            print(f"买入信号 PlotItem 类型: {type(plot_item)}")
+            # 强制设置 Z值为 0，确保低于所有其他元素
+            try:
+                plot_item.setZValue(0)  # 尝试设为 0
+                print("✅ 买入信号 Z值已设置为 0")
+            except Exception as e:
+                print(f"❌ 设置买入信号 Z值失败: {e}")
+            # ====================================================
 
     # 卖出信号（↑ 三角形，放在最高价上方）
     if sell_signals:
         sell_x, sell_y = [], []
         for dt_str, _ in sell_signals:
-            match_rows = df_plot[df_plot['date_str'] == dt_str]
-            if not match_rows.empty:
-                row = match_rows.iloc[0]
-                signal_price = row['high'] * (1 + price_offset)
-                sell_x.append(row.name)
+            mask = df_plot['date_str'] == dt_str
+            if mask.any():
+                idx = df_plot.index[mask][0]
+                signal_price = df_plot.loc[idx, 'high'] * (1 + price_offset)
+                sell_x.append(idx)  # 直接使用秒级索引
                 sell_y.append(signal_price)
         if sell_x:
-            fplt.plot(sell_x, sell_y, ax=ax, color='#1E90FF',
-                      style='^', width=2.5, legend='卖出')
+            # ========== 【关键修改】先绘制，再设置Z值 ==========
+            plot_item = fplt.plot(sell_x, sell_y, ax=ax, color='#1E90FF',
+                                  style='^', width=2.5, legend='卖出')
+            # 添加调试信息
+            print(f"卖出信号 PlotItem 类型: {type(plot_item)}")
+            # 强制设置 Z值为 0，确保低于所有其他元素
+            try:
+                plot_item.setZValue(0)  # 尝试设为 0
+                print("✅ 卖出信号 Z值已设置为 0")
+            except Exception as e:
+                print(f"❌ 设置卖出信号 Z值失败: {e}")
+            # ====================================================
 
 
 def append_trade_signals(df_plot, ax, signals):
@@ -519,6 +546,7 @@ def plot_a_stock_analysis(
     df,
     symbol='A股',
     title_suffix='',
+    signals=None,
     hover_callback=None,      # 新增参数
     crosshair_callback=None   # 新增参数
 ):
@@ -530,6 +558,9 @@ def plot_a_stock_analysis(
                            还需包含 'date_str' 列（格式 '%Y-%m-%d'），用于信号绘制。
         symbol (str): 股票代码，用于标题和悬停提示。
         title_suffix (str): 标题后缀，可选。
+        signals (list): 交易信号列表，例如：
+                        - [{'date': '2023-05-10', 'type': 'buy'}, {'date': '2023-06-15', 'type': 'sell'}]
+                        - 或 [('2023-05-10', 'buy'), ('2023-06-15', 'sell')]
         hover_callback (callable): 自定义悬停回调，签名为 func(x, y, df, symbol, interval, hover_label, ax)
         crosshair_callback (callable): 自定义十字线回调，签名为 func(x, y, xtext, ytext, df)
     """
@@ -546,7 +577,7 @@ def plot_a_stock_analysis(
     full_title = f'A股 {symbol} 平均K线图'
     if title_suffix:
         full_title += f' - {title_suffix}'
-    ax, axv, ax2, ax3, ax4, ax5, ax6, ax7 = fplt.create_plot(full_title, rows=8)
+    ax, ax1, ax2, ax3, ax4, ax5, ax6, ax7 = fplt.create_plot(full_title, rows=8)
     # 不显示第一个ax的网格线
     ax.set_visible(xgrid=False, ygrid=False)
 
@@ -566,24 +597,39 @@ def plot_a_stock_analysis(
     hover_label.setPos(800, 20)  # 先设一个固定值，hover时再校准
     hover_label.setZValue(1000)  # 提升层级，确保在最上层
 
+    ####### 图层顺序 #######
+    # 1.  K线图 (主图)
+    # 2.  成交量 (Volume) 及其均量线
+    # 3.  MACD (趋势与动能)
+    # 4.  RSI (超买超卖)
+    # 5.  KDJ (短线买卖信号)
+    # 6.  OBV (能量潮，资金流)
+    # 7.  布林带 (Bollinger Bands) 或 EMA (短期趋势)
     # price chart
     plot_candlestick(df, ax=ax)
     plot_ma(df, ax)
 
-    plot_heikin_ashi(df, ax7)
-    plot_bollinger_bands(df, ax7)
-    plot_ema(df, ax7)
+    plot_heikin_ashi(df, ax5)
+    plot_bollinger_bands(df, ax5)
+    plot_ema(df, ax5)
 
     # volume chart
-    plot_heikin_ashi_volume(df, axv)
-    plot_vma(df, ax=axv)
+    plot_heikin_ashi_volume(df, ax1)
+    plot_vma(df, ax=ax1)
+
+    plot_macd(df, ax2)
+    plot_rsi(df, ax3)
+    plot_kdj(df, ax4)
 
     # some more charts
-    plot_accumulation_distribution(df, ax2)
-    plot_on_balance_volume(df, ax3)
-    plot_rsi(df, ax4)
-    plot_macd(df, ax5)
-    plot_kdj(df, ax6)
+    plot_accumulation_distribution(df, ax7)
+    plot_on_balance_volume(df, ax6)
+
+
+    # ========== 【关键新增】在所有内容绘制完成后，添加交易信号 ==========
+    if signals is not None:
+        append_trade_signals(df_plot=df, ax=ax, signals=signals)
+    # ==================================================================
 
     # ========== 设置回调（使用默认或用户提供的） ==========
     final_hover_cb = hover_callback or default_hover_callback
